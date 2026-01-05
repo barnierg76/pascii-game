@@ -24,12 +24,17 @@
         }
 
         #ascii-container {
-            width: 100%;
-            height: 100%;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            background: #000000;
         }
 
-        #ascii-container table {
-            margin: 0 auto;
+        #ascii-container > div {
+            transform-origin: center center;
         }
 
         #ui-overlay {
@@ -370,43 +375,113 @@
         let audioInitialized = false;
         let backgroundMusic = null;
         let musicGain = null;
+        let demoMusic = null;
+        let demoMusicGain = null;
+        let gameMusicBuffer = null;
+        let demoMusicBuffer = null;
 
         function initAudio() {
             if (audioInitialized) return;
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
             audioInitialized = true;
 
-            // Start background music
-            startBackgroundMusic();
+            // Preload both music tracks
+            preloadMusic();
         }
 
-        async function startBackgroundMusic() {
+        async function preloadMusic() {
+            if (!audioContext) return;
+
+            // Load game music
+            try {
+                const gameResponse = await fetch('music.mp3');
+                if (gameResponse.ok) {
+                    const gameArrayBuffer = await gameResponse.arrayBuffer();
+                    gameMusicBuffer = await audioContext.decodeAudioData(gameArrayBuffer);
+                }
+            } catch (e) {
+                console.log('Could not load game music:', e);
+            }
+
+            // Load demo music
+            try {
+                const demoResponse = await fetch('demo-music.mp3');
+                if (demoResponse.ok) {
+                    const demoArrayBuffer = await demoResponse.arrayBuffer();
+                    demoMusicBuffer = await audioContext.decodeAudioData(demoArrayBuffer);
+                }
+            } catch (e) {
+                console.log('Could not load demo music:', e);
+            }
+        }
+
+        function startDemoMusic() {
+            if (!audioContext || demoMusic) return;
+
+            // Stop game music if playing
+            stopGameMusic();
+
+            if (demoMusicBuffer) {
+                demoMusicGain = audioContext.createGain();
+                demoMusicGain.gain.value = 0.5;
+                demoMusicGain.connect(audioContext.destination);
+
+                demoMusic = audioContext.createBufferSource();
+                demoMusic.buffer = demoMusicBuffer;
+                demoMusic.loop = true;
+                demoMusic.connect(demoMusicGain);
+                demoMusic.start(0);
+            } else {
+                // Fallback to ambient synth
+                createAmbientMusic();
+            }
+        }
+
+        function stopDemoMusic() {
+            if (demoMusic) {
+                try {
+                    demoMusic.stop();
+                } catch (e) {}
+                demoMusic = null;
+            }
+            if (demoMusicGain) {
+                demoMusicGain.disconnect();
+                demoMusicGain = null;
+            }
+        }
+
+        function startGameMusic() {
             if (!audioContext || backgroundMusic) return;
 
-            try {
-                // Try to load the local music file (Ghost In The Command Line.mp3)
-                const response = await fetch('music.mp3');
-                if (!response.ok) {
-                    // If local file doesn't work, create ambient synth music
-                    createAmbientMusic();
-                    return;
-                }
-                const arrayBuffer = await response.arrayBuffer();
-                const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+            // Stop demo music
+            stopDemoMusic();
 
+            if (gameMusicBuffer) {
                 musicGain = audioContext.createGain();
-                musicGain.gain.value = 0.4;  // Good volume level
+                musicGain.gain.value = 0.4;
                 musicGain.connect(audioContext.destination);
 
                 backgroundMusic = audioContext.createBufferSource();
-                backgroundMusic.buffer = audioBuffer;
+                backgroundMusic.buffer = gameMusicBuffer;
                 backgroundMusic.loop = true;
                 backgroundMusic.connect(musicGain);
                 backgroundMusic.start(0);
-            } catch (e) {
-                // Fallback to procedural ambient music
-                console.log('Could not load music.mp3, using procedural audio:', e);
+            } else {
+                // Fallback to ambient synth
                 createAmbientMusic();
+            }
+        }
+
+        function stopGameMusic() {
+            if (backgroundMusic) {
+                try {
+                    backgroundMusic.stop();
+                } catch (e) {}
+                backgroundMusic = null;
+            }
+            if (musicGain) {
+                musicGain.disconnect();
+                musicGain = null;
             }
         }
 
@@ -621,6 +696,9 @@
 
             // Append ASCII output (NOT renderer.domElement!)
             document.getElementById('ascii-container').appendChild(effect.domElement);
+
+            // Scale ASCII to fill viewport after a brief delay
+            setTimeout(scaleAsciiToFit, 100);
 
             // Lighting - crucial for ASCII depth perception
             setupLighting();
@@ -1872,6 +1950,38 @@
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
             effect.setSize(window.innerWidth, window.innerHeight);
+
+            // Scale ASCII to fill viewport
+            scaleAsciiToFit();
+        }
+
+        function scaleAsciiToFit() {
+            // Wait for next frame to ensure DOM is updated
+            requestAnimationFrame(() => {
+                const container = document.getElementById('ascii-container');
+                const asciiDiv = effect.domElement;
+                if (!asciiDiv) return;
+
+                const table = asciiDiv.querySelector('table');
+                if (!table) return;
+
+                // Reset transform to measure natural size
+                asciiDiv.style.transform = 'none';
+
+                const tableWidth = table.offsetWidth;
+                const tableHeight = table.offsetHeight;
+                const containerWidth = window.innerWidth;
+                const containerHeight = window.innerHeight;
+
+                if (tableWidth > 0 && tableHeight > 0) {
+                    // Calculate scale to fill viewport (use larger scale to fill)
+                    const scaleX = containerWidth / tableWidth;
+                    const scaleY = containerHeight / tableHeight;
+                    const scale = Math.max(scaleX, scaleY);  // Fill viewport completely
+
+                    asciiDiv.style.transform = `scale(${scale})`;
+                }
+            });
         }
 
         function onKeyDown(e) {
@@ -1881,7 +1991,8 @@
                     initGame();
                     gameState = 'playing';
                     messageOverlay.style.display = 'none';
-                    playStartSound();
+                    // Switch from demo music to game music
+                    startGameMusic();
                 }
                 e.preventDefault();
                 return;
@@ -1916,6 +2027,22 @@
                     break;
             }
         }
+
+        // Start demo music on first user interaction (required by browsers)
+        function startDemoOnInteraction() {
+            initAudio();
+            // Give a moment for audio to initialize, then start demo music
+            setTimeout(() => {
+                if (gameState === 'waiting') {
+                    startDemoMusic();
+                }
+            }, 100);
+            // Remove listeners after first interaction
+            document.removeEventListener('click', startDemoOnInteraction);
+            document.removeEventListener('keydown', startDemoOnInteraction);
+        }
+        document.addEventListener('click', startDemoOnInteraction);
+        document.addEventListener('keydown', startDemoOnInteraction);
 
         // Start the game
         init();

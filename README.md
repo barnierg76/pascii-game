@@ -1,11 +1,11 @@
-# P.ASC.II - Enter The Matrix
+# P.ASC.II - 3D ASCII Pacman
 
 A 3D Pacman game rendered entirely in ASCII characters using Three.js AsciiEffect.
 
 ## Features
 
 - **TRUE ASCII Rendering**: The entire game is rendered as actual text characters via Three.js AsciiEffect
-- **Matrix Aesthetic**: Green-on-black color scheme with phosphor glow effects
+- **Retro Aesthetic**: Green-on-black color scheme with phosphor glow effects
 - **3D Amsterdam Cityscape**: Canal houses, church tower, and bridges surround the maze
 - **Cinematic Camera Director**: 5 dramatic camera modes cycle in demo mode:
   - ASCII Reveal: Far zoom showing the entire scene is made of ASCII

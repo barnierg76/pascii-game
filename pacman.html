@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>P.ASC.II" - Enter The Matrix</title>
+    <title>P.ASC.II - 3D ASCII Pacman</title>
     <style>
         * {
             margin: 0;
@@ -11,19 +11,29 @@
             box-sizing: border-box;
         }
 
-        body {
+        html, body {
             background: #000000;
             overflow: hidden;
             font-family: 'Courier New', monospace;
+            width: 100%;
+            height: 100%;
         }
 
         #game-container {
-            position: relative;
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
             width: 100vw;
             height: 100vh;
+            background: #000000;
         }
 
         #ascii-container {
+            position: absolute;
+            top: 0;
+            left: 0;
             width: 100vw;
             height: 100vh;
             display: flex;
@@ -215,7 +225,7 @@
 
         <div id="message-overlay">
             <div id="message">> P.ASC" II_</div>
-            <div id="sub-message">> Press SPACE to jack in_</div>
+            <div id="sub-message">> Press SPACE to start_</div>
         </div>
 
         <div id="controls-hint">> ARROW KEYS or WASD to navigate_</div>
@@ -368,6 +378,44 @@
         const MOVEMENT_SMOOTHING = 0.25;
         const ROTATION_SMOOTHING = 0.22;
 
+        // Stillness melt effect - letters melt when player stops moving
+        let lastPacmanX = 14;
+        let lastPacmanY = 23;
+        let stillnessTimer = 0;
+        const STILLNESS_THRESHOLD = 3.0;  // Seconds before melt starts
+        let meltIntensity = 0;
+        const MAX_MELT_INTENSITY = 1.0;
+
+        // Color progression - individual objects gain real colors gradually
+        let colorProgression = 0;  // 0 = pure green/mono, 1 = full color
+        const COLOR_SCORE_THRESHOLD = 500;   // Score needed for first color hints
+        const COLOR_SCORE_MAX = 5000;        // Score for maximum color
+        let totalScore = 0;  // Cumulative score across all levels
+
+        // Material references for individual color control
+        let pacmanMaterial = null;
+        let wallMaterialRef = null;
+        let dotMaterialRef = null;
+        let powerMaterialRef = null;
+        let ghostMaterials = [];  // Array of ghost body materials
+
+        // Real target colors for each object
+        const REAL_COLORS = {
+            pacman: { color: 0xffff00, emissive: 0xffcc00 },
+            wall: { color: 0x2121de },
+            dot: { color: 0xffffcc, emissive: 0xffff66 },
+            power: { color: 0xffffff, emissive: 0xff66ff },
+            ghosts: [
+                { color: 0xff0000, emissive: 0xff0000 },  // Red (Blinky)
+                { color: 0xffb8ff, emissive: 0xffb8ff },  // Pink (Pinky)
+                { color: 0x00ffff, emissive: 0x00ffff },  // Cyan (Inky)
+                { color: 0xffb851, emissive: 0xffb851 }   // Orange (Clyde)
+            ]
+        };
+
+        // Monochrome green starting color
+        const MONO_GREEN = 0x00ff41;
+
         // ============================================
         // AUDIO SYSTEM
         // ============================================
@@ -389,6 +437,8 @@
             preloadMusic();
         }
 
+        let musicLoadPromise = null;
+
         async function preloadMusic() {
             if (!audioContext) return;
 
@@ -398,6 +448,7 @@
                 if (gameResponse.ok) {
                     const gameArrayBuffer = await gameResponse.arrayBuffer();
                     gameMusicBuffer = await audioContext.decodeAudioData(gameArrayBuffer);
+                    console.log('Game music loaded successfully');
                 }
             } catch (e) {
                 console.log('Could not load game music:', e);
@@ -405,10 +456,18 @@
 
             // Load demo music
             try {
+                console.log('Loading demo music...');
                 const demoResponse = await fetch('demo-music.mp3');
                 if (demoResponse.ok) {
                     const demoArrayBuffer = await demoResponse.arrayBuffer();
                     demoMusicBuffer = await audioContext.decodeAudioData(demoArrayBuffer);
+                    console.log('Demo music loaded successfully!');
+                    // Auto-start demo music if still in waiting state
+                    if (gameState === 'waiting' && !demoMusic) {
+                        startDemoMusic();
+                    }
+                } else {
+                    console.log('Demo music response not ok:', demoResponse.status);
                 }
             } catch (e) {
                 console.log('Could not load demo music:', e);
@@ -486,7 +545,7 @@
         }
 
         function createAmbientMusic() {
-            // Create eerie ambient Matrix-style background music
+            // Create eerie ambient background music
             if (!audioContext) return;
 
             musicGain = audioContext.createGain();
@@ -513,7 +572,7 @@
             lfoGain.connect(bassDrone.frequency);
             lfo.start();
 
-            // Ethereal pad - Matrix green code sound
+            // Ethereal pad - green code sound
             const pad1 = audioContext.createOscillator();
             pad1.type = 'triangle';
             pad1.frequency.value = 110;
@@ -685,7 +744,7 @@
             });
             effect.setSize(window.innerWidth, window.innerHeight);
 
-            // Matrix green styling - tiny characters like pixels for maximum detail
+            // Green styling - tiny characters like pixels for maximum detail
             effect.domElement.style.color = '#00FF41';
             effect.domElement.style.backgroundColor = '#000000';
             effect.domElement.style.fontFamily = "monospace";
@@ -750,7 +809,7 @@
         function createDistantWorld() {
             // ============================================
             // AMSTERDAM-STYLE CITYSCAPE AROUND THE MAZE
-            // The maze sits in the middle of a Matrix/Amsterdam city
+            // The maze sits in the middle of an Amsterdam city
             // ============================================
 
             const mazeCenter = { x: COLS / 2, z: ROWS / 2 };
@@ -766,7 +825,7 @@
             ground.position.set(mazeCenter.x, -0.15, mazeCenter.z);
             scene.add(ground);
 
-            // Grid lines on ground - Matrix aesthetic
+            // Grid lines on ground - digital aesthetic
             const gridHelper = new THREE.GridHelper(500, 150, 0x002200, 0x001100);
             gridHelper.position.set(mazeCenter.x, -0.1, mazeCenter.z);
             scene.add(gridHelper);
@@ -905,7 +964,7 @@
             }
 
             // ============================================
-            // DATA STREAMS - Vertical Matrix rain pillars
+            // DATA STREAMS - Vertical digital rain pillars
             // ============================================
             const streamMat = new THREE.MeshPhongMaterial({
                 color: 0x00ff00,
@@ -956,7 +1015,7 @@
             });
 
             // ============================================
-            // FLOATING SHAPES - Matrix aesthetic
+            // FLOATING SHAPES - digital aesthetic
             // ============================================
             const shapeMat = new THREE.MeshPhongMaterial({
                 color: 0x00aa00,
@@ -1056,27 +1115,30 @@
         }
 
         function createMaze() {
-            // Wall material - using Lambert for cleaner matte look
+            // Wall material - START MONOCHROME GREEN
             const wallMaterial = new THREE.MeshLambertMaterial({
-                color: 0x3333cc,
+                color: MONO_GREEN,
                 flatShading: true
             });
+            wallMaterialRef = wallMaterial;  // Store reference for color progression
 
-            // Dot material - bright for visibility
+            // Dot material - START MONOCHROME GREEN
             const dotMaterial = new THREE.MeshPhongMaterial({
-                color: 0xffffff,
-                emissive: 0xffaa88,
+                color: MONO_GREEN,
+                emissive: MONO_GREEN,
+                emissiveIntensity: 0.5,
+                flatShading: true
+            });
+            dotMaterialRef = dotMaterial;  // Store reference for color progression
+
+            // Power pellet material - START MONOCHROME GREEN (slightly brighter)
+            const powerMaterial = new THREE.MeshPhongMaterial({
+                color: MONO_GREEN,
+                emissive: MONO_GREEN,
                 emissiveIntensity: 0.8,
                 flatShading: true
             });
-
-            // Power pellet material
-            const powerMaterial = new THREE.MeshPhongMaterial({
-                color: 0xffffff,
-                emissive: 0xffffff,
-                emissiveIntensity: 1.0,
-                flatShading: true
-            });
+            powerMaterialRef = powerMaterial;  // Store reference for color progression
 
             for (let row = 0; row < ROWS; row++) {
                 for (let col = 0; col < COLS; col++) {
@@ -1118,15 +1180,17 @@
             pacmanGroup = new THREE.Group();
 
             // Pacman body - sphere with wide mouth wedge cut out
+            // START MONOCHROME GREEN - will gain yellow color as score increases
             const pacmanGeom = new THREE.SphereGeometry(0.45, 32, 32, 0.5, Math.PI * 1.5, 0, Math.PI);
             const pacmanMat = new THREE.MeshPhongMaterial({
-                color: 0xffff00,
-                emissive: 0xffcc00,
-                emissiveIntensity: 0.8,
+                color: MONO_GREEN,
+                emissive: MONO_GREEN,
+                emissiveIntensity: 0.5,
                 flatShading: false,  // Smooth for rounder look
                 side: THREE.DoubleSide,
                 shininess: 60
             });
+            pacmanMaterial = pacmanMat;  // Store reference for color progression
             pacmanMesh = new THREE.Mesh(pacmanGeom, pacmanMat);
             pacmanMesh.rotation.x = Math.PI / 2;
             pacmanMesh.rotation.z = Math.PI / 2;
@@ -1146,19 +1210,22 @@
         function createGhosts() {
             ghostMeshes = [];
             ghosts = [];
+            ghostMaterials = [];  // Reset ghost materials array
 
             for (let i = 0; i < 4; i++) {
                 const ghostGroup = new THREE.Group();
 
                 // Ghost body - dome shape
+                // START MONOCHROME GREEN - will gain individual colors as score increases
                 const bodyGeom = new THREE.SphereGeometry(0.4, 16, 16, 0, Math.PI * 2, 0, Math.PI * 0.6);
                 const bodyMat = new THREE.MeshPhongMaterial({
-                    color: ghostColors[i],
-                    emissive: ghostColors[i],
+                    color: MONO_GREEN,
+                    emissive: MONO_GREEN,
                     emissiveIntensity: 0.3,
                     flatShading: true,
                     side: THREE.DoubleSide
                 });
+                ghostMaterials.push(bodyMat);  // Store reference for color progression
                 const body = new THREE.Mesh(bodyGeom, bodyMat);
                 body.rotation.x = Math.PI;
                 body.position.y = 0.15;
@@ -1170,11 +1237,11 @@
                 skirt.position.y = -0.05;
                 ghostGroup.add(skirt);
 
-                // Eyes
+                // Eyes - keep white/blue, they're natural
                 const eyeWhiteGeom = new THREE.SphereGeometry(0.12, 8, 8);
-                const eyeWhiteMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+                const eyeWhiteMat = new THREE.MeshBasicMaterial({ color: MONO_GREEN });
                 const eyePupilGeom = new THREE.SphereGeometry(0.06, 8, 8);
-                const eyePupilMat = new THREE.MeshBasicMaterial({ color: 0x0000ff });
+                const eyePupilMat = new THREE.MeshBasicMaterial({ color: 0x003300 });
 
                 const leftEyeWhite = new THREE.Mesh(eyeWhiteGeom, eyeWhiteMat);
                 leftEyeWhite.position.set(-0.12, 0.25, -0.3);
@@ -1333,6 +1400,8 @@
             if (map[tileY] && map[tileY][tileX] === 2) {
                 map[tileY][tileX] = 0;
                 score += 10;
+                totalScore += 10;
+                updateColorProgression();
                 dotsRemaining--;
                 playChompSound();
 
@@ -1347,6 +1416,8 @@
             } else if (map[tileY] && map[tileY][tileX] === 3) {
                 map[tileY][tileX] = 0;
                 score += 50;
+                totalScore += 50;
+                updateColorProgression();
                 dotsRemaining--;
                 powerMode = true;
                 powerModeSpeedBoost = true;
@@ -1490,6 +1561,8 @@
                 if (dist < 0.8) {
                     if (ghost.scared) {
                         score += 200;
+                        totalScore += 200;
+                        updateColorProgression();
                         playEatGhostSound();
                         ghost.x = 14;
                         ghost.y = 14;
@@ -1686,21 +1759,22 @@
                 idleTimer += delta;
 
                 // Cinematic phase timer - cycles through different camera modes
-                cinematicZoomPhase += delta * 0.015;  // Slower phase for longer shots
+                // FASTER progression for more dynamic demo mode
+                cinematicZoomPhase += delta * 0.08;  // Much faster transitions!
 
-                // Calculate which camera mode we're in (cycles every ~20 seconds per mode)
-                const modeTime = cinematicZoomPhase % 12;  // 12 "units" per mode cycle
-                const totalCycleTime = cinematicZoomPhase % 60;  // Full cycle through all modes
+                // Calculate which camera mode we're in (shorter cycles for more action)
+                const modeTime = cinematicZoomPhase % 6;  // 6 "units" per mode cycle
+                const totalCycleTime = cinematicZoomPhase % 30;  // Full cycle in 30 units
 
-                // Camera mode selector - 5 distinct cinematic modes
+                // Camera mode selector - 5 distinct cinematic modes (faster switching)
                 let cameraMode;
-                if (totalCycleTime < 8) {
+                if (totalCycleTime < 4) {
                     cameraMode = 'ascii_reveal';      // Start zoomed WAY out - see it's all ASCII
-                } else if (totalCycleTime < 20) {
+                } else if (totalCycleTime < 10) {
                     cameraMode = 'extreme_ascii';     // EXTREME zoom to character level
-                } else if (totalCycleTime < 32) {
+                } else if (totalCycleTime < 16) {
                     cameraMode = 'wall_flyover';      // Fly low over maze walls
-                } else if (totalCycleTime < 44) {
+                } else if (totalCycleTime < 22) {
                     cameraMode = 'city_orbit';        // Wide orbit showing Amsterdam skyline
                 } else {
                     cameraMode = 'action_follow';     // Dynamic follow shot
@@ -1720,86 +1794,86 @@
                     case 'ascii_reveal':
                         // Start VERY far out - show entire scene is ASCII
                         cinematicZoomTarget = 3.5;
-                        const revealAngle = cinematicZoomPhase * 0.3;
+                        const revealAngle = cinematicZoomPhase * 0.8;  // Faster orbit
                         targetCamPos.set(
                             mazeCenter.x + Math.sin(revealAngle) * 40,
-                            35,
+                            35 + Math.sin(revealAngle * 0.5) * 10,  // Bobbing height
                             mazeCenter.z + Math.cos(revealAngle) * 40
                         );
                         targetLookAt.copy(mazeCenter);
                         targetLookAt.y = 2;
-                        smoothingFactor = 0.02;
+                        smoothingFactor = 0.06;  // Faster smoothing
                         break;
 
                     case 'extreme_ascii':
                         // EXTREME close-up - see individual ASCII characters!
                         cinematicZoomTarget = 0.15;  // SUPER close!
-                        const extremeAngle = cinematicZoomPhase * 0.8;
+                        const extremeAngle = cinematicZoomPhase * 2.0;  // Much faster orbit
                         // Orbit very close to a wall or pacman
-                        const closeRadius = 2;
+                        const closeRadius = 2 + Math.sin(extremeAngle * 0.3) * 0.5;
                         targetCamPos.set(
                             pacmanWorldPos.x + Math.sin(extremeAngle) * closeRadius,
-                            1.5 + Math.sin(extremeAngle * 0.5) * 0.5,
+                            1.5 + Math.sin(extremeAngle * 0.8) * 0.8,  // More dynamic height
                             pacmanWorldPos.z + Math.cos(extremeAngle) * closeRadius
                         );
                         targetLookAt.copy(pacmanWorldPos);
                         targetLookAt.y = 0.5;
-                        smoothingFactor = 0.04;
+                        smoothingFactor = 0.08;  // Snappier
                         break;
 
                     case 'wall_flyover':
                         // Fly LOW over the maze walls - dramatic flyby
                         cinematicZoomTarget = 0.8;
-                        const flyTime = (totalCycleTime - 20) / 12;  // 0 to 1 through this phase
-                        const flyPath = flyTime * Math.PI * 2;
+                        const flyTime = (totalCycleTime - 10) / 6;  // Faster progression
+                        const flyPath = flyTime * Math.PI * 3;  // More loops
                         // Sinuous path over the maze
-                        const flyX = mazeCenter.x + Math.sin(flyPath * 2) * 8;
-                        const flyZ = mazeCenter.z + Math.cos(flyPath) * 10;
-                        targetCamPos.set(flyX, 2.5 + Math.sin(flyPath * 3) * 1.5, flyZ);
+                        const flyX = mazeCenter.x + Math.sin(flyPath * 2) * 10;
+                        const flyZ = mazeCenter.z + Math.cos(flyPath * 1.5) * 12;
+                        targetCamPos.set(flyX, 2.0 + Math.sin(flyPath * 4) * 2, flyZ);  // More height variation
                         // Look ahead in the direction of travel
                         targetLookAt.set(
-                            flyX + Math.sin(flyPath * 2 + 0.5) * 5,
-                            1,
-                            flyZ + Math.cos(flyPath + 0.5) * 5
+                            flyX + Math.sin(flyPath * 2 + 0.8) * 6,
+                            0.5,
+                            flyZ + Math.cos(flyPath * 1.5 + 0.8) * 6
                         );
-                        smoothingFactor = 0.05;
+                        smoothingFactor = 0.1;  // Fast tracking
                         break;
 
                     case 'city_orbit':
                         // WIDE orbit showing Amsterdam city skyline
                         cinematicZoomTarget = 2.5;
-                        const cityAngle = cinematicZoomPhase * 0.2;
-                        const cityRadius = 50;  // Very wide orbit
+                        const cityAngle = cinematicZoomPhase * 0.6;  // Faster orbit
+                        const cityRadius = 45 + Math.sin(cityAngle * 0.3) * 10;  // Varying radius
                         targetCamPos.set(
                             mazeCenter.x + Math.sin(cityAngle) * cityRadius,
-                            20 + Math.sin(cityAngle * 0.5) * 8,
+                            18 + Math.sin(cityAngle * 0.7) * 12,  // More height variation
                             mazeCenter.z + Math.cos(cityAngle) * cityRadius
                         );
                         // Look at the city/maze from outside
-                        targetLookAt.set(mazeCenter.x, 5, mazeCenter.z);
-                        smoothingFactor = 0.015;  // Very smooth for cinematic feel
+                        targetLookAt.set(mazeCenter.x, 5 + Math.sin(cityAngle) * 2, mazeCenter.z);
+                        smoothingFactor = 0.04;  // Faster but still smooth
                         break;
 
                     case 'action_follow':
                     default:
                         // Dynamic follow - mix of close and medium shots
-                        const actionPhase = Math.sin(cinematicZoomPhase * 0.5);
+                        const actionPhase = Math.sin(cinematicZoomPhase * 1.2);  // Faster pulse
                         cinematicZoomTarget = 0.8 + actionPhase * 0.4;
-                        const actionAngle = cameraAngle;
-                        const actionRadius = 8 + actionPhase * 5;
+                        const actionAngle = cameraAngle * 2;  // Faster orbit
+                        const actionRadius = 6 + actionPhase * 6;  // More dynamic
                         targetCamPos.set(
                             pacmanWorldPos.x + Math.sin(actionAngle) * actionRadius,
-                            5 + actionPhase * 3,
+                            4 + actionPhase * 4,
                             pacmanWorldPos.z + Math.cos(actionAngle) * actionRadius
                         );
                         targetLookAt.copy(pacmanWorldPos);
                         targetLookAt.y = 0.5;
-                        smoothingFactor = 0.04;
+                        smoothingFactor = 0.08;  // Snappier
                         break;
                 }
 
-                // Smooth transition to zoom target
-                cinematicZoom += (cinematicZoomTarget - cinematicZoom) * 0.02;
+                // Smooth transition to zoom target (faster for more dynamic feel)
+                cinematicZoom += (cinematicZoomTarget - cinematicZoom) * 0.05;
 
                 // Apply camera position with smoothing
                 camera.position.x += (targetCamPos.x - camera.position.x) * smoothingFactor;
@@ -1936,9 +2010,264 @@
             });
 
             // ============================================
+            // STILLNESS MELT EFFECT - Letters distort when standing still
+            // ============================================
+            if (gameState === 'playing') {
+                // Check if pacman has moved
+                const hasMoved = (pacman.x !== lastPacmanX || pacman.y !== lastPacmanY);
+
+                if (hasMoved) {
+                    // Reset stillness timer when moving
+                    stillnessTimer = 0;
+                    meltIntensity = 0;
+                    lastPacmanX = pacman.x;
+                    lastPacmanY = pacman.y;
+                } else {
+                    // Increment stillness timer
+                    stillnessTimer += delta;
+
+                    // Start melting after threshold
+                    if (stillnessTimer > STILLNESS_THRESHOLD) {
+                        // Increase melt intensity over time (takes ~5 seconds to reach max)
+                        meltIntensity = Math.min(MAX_MELT_INTENSITY,
+                            (stillnessTimer - STILLNESS_THRESHOLD) / 5.0);
+                    }
+                }
+            } else {
+                // No melt effect outside of gameplay
+                stillnessTimer = 0;
+                meltIntensity = 0;
+            }
+
+            // ============================================
             // RENDER AS ASCII - This outputs REAL text!
             // ============================================
             effect.render(scene, camera);
+
+            // Apply melt distortion effect to ASCII output
+            if (meltIntensity > 0 && effect.domElement) {
+                applyMeltEffect(meltIntensity, time);
+            } else if (effect.domElement) {
+                // Reset any distortion when not melting
+                resetMeltEffect();
+            }
+
+            // Update color progression animation (for rainbow mode)
+            if (colorProgression > 0.6) {
+                applyColorProgression();
+            }
+        }
+
+        // ============================================
+        // MELT EFFECT FUNCTIONS
+        // ============================================
+        let meltFilters = '';
+
+        function applyMeltEffect(intensity, time) {
+            const asciiDiv = effect.domElement;
+            if (!asciiDiv) return;
+
+            const table = asciiDiv.querySelector('table');
+            if (!table) return;
+
+            // Multiple distortion effects that increase with intensity
+            const waveAmount = intensity * 15;
+            const blurAmount = intensity * 2;
+            const hueShift = Math.sin(time * 2) * intensity * 30;
+            const skewAmount = Math.sin(time * 1.5) * intensity * 5;
+            const scaleWobble = 1 + Math.sin(time * 3) * intensity * 0.05;
+
+            // Apply wavy distortion using CSS filters and transforms
+            const filters = [
+                `blur(${blurAmount}px)`,
+                `hue-rotate(${hueShift}deg)`,
+                `contrast(${1 + intensity * 0.5})`,
+                `saturate(${1 + intensity})`
+            ].join(' ');
+
+            // Create melting wave effect
+            const transforms = [
+                `skewX(${skewAmount}deg)`,
+                `skewY(${Math.cos(time * 1.8) * intensity * 3}deg)`,
+                `scaleY(${scaleWobble})`
+            ].join(' ');
+
+            table.style.filter = filters;
+            table.style.transform = transforms;
+            table.style.transition = 'none';
+
+            // Add glitchy row distortions for more intense melt
+            if (intensity > 0.3) {
+                applyRowDistortion(table, intensity, time);
+            }
+        }
+
+        function applyRowDistortion(table, intensity, time) {
+            const rows = table.querySelectorAll('tr');
+            const rowCount = rows.length;
+
+            rows.forEach((row, i) => {
+                // Create wave pattern that flows down
+                const waveOffset = Math.sin((i / rowCount) * Math.PI * 4 + time * 3) * intensity * 10;
+                const verticalDrip = Math.max(0, Math.sin((i / rowCount) * Math.PI + time) * intensity * 5);
+
+                row.style.transform = `translateX(${waveOffset}px) translateY(${verticalDrip}px)`;
+                row.style.opacity = 1 - (intensity * 0.3 * Math.random());
+
+                // Randomly glitch some characters at high intensity
+                if (intensity > 0.6 && Math.random() < 0.1) {
+                    row.style.letterSpacing = `${(Math.random() - 0.5) * intensity * 5}px`;
+                }
+            });
+        }
+
+        function resetMeltEffect() {
+            const asciiDiv = effect.domElement;
+            if (!asciiDiv) return;
+
+            const table = asciiDiv.querySelector('table');
+            if (!table) return;
+
+            table.style.filter = 'none';
+            table.style.transform = 'none';
+
+            const rows = table.querySelectorAll('tr');
+            rows.forEach(row => {
+                row.style.transform = 'none';
+                row.style.opacity = 1;
+                row.style.letterSpacing = '';
+            });
+        }
+
+        // ============================================
+        // COLOR PROGRESSION FUNCTIONS
+        // ============================================
+
+        function updateColorProgression() {
+            // Calculate color progression based on total score
+            // Starts at 0 (pure green), reaches 1 (full color) at max score
+            if (totalScore < COLOR_SCORE_THRESHOLD) {
+                colorProgression = 0;
+            } else {
+                colorProgression = Math.min(1,
+                    (totalScore - COLOR_SCORE_THRESHOLD) / (COLOR_SCORE_MAX - COLOR_SCORE_THRESHOLD)
+                );
+            }
+
+            // Apply color to ASCII effect
+            applyColorProgression();
+        }
+
+        // Helper to interpolate between two hex colors
+        function lerpColor(color1, color2, t) {
+            const r1 = (color1 >> 16) & 0xff;
+            const g1 = (color1 >> 8) & 0xff;
+            const b1 = color1 & 0xff;
+            const r2 = (color2 >> 16) & 0xff;
+            const g2 = (color2 >> 8) & 0xff;
+            const b2 = color2 & 0xff;
+            const r = Math.round(r1 + (r2 - r1) * t);
+            const g = Math.round(g1 + (g2 - g1) * t);
+            const b = Math.round(b1 + (b2 - b1) * t);
+            return (r << 16) | (g << 8) | b;
+        }
+
+        function applyColorProgression() {
+            // ASCII output stays pure matrix green ALWAYS
+            const asciiDiv = effect.domElement;
+            if (asciiDiv) {
+                asciiDiv.style.color = '#00FF41';
+                asciiDiv.style.textShadow = '0 0 2px rgba(0,255,65,0.6)';
+            }
+
+            // Individual objects gain their real colors one by one as score increases
+            // Thresholds for when each object "wakes up" with color:
+            // 0.00-0.15: All green (Matrix world)
+            // 0.15-0.30: Pacman gains yellow
+            // 0.30-0.45: Dots brighten
+            // 0.45-0.55: Ghost 1 (Blinky/red)
+            // 0.55-0.65: Ghost 2 (Pinky/pink)
+            // 0.65-0.75: Ghost 3 (Inky/cyan)
+            // 0.75-0.85: Ghost 4 (Clyde/orange)
+            // 0.85-1.00: Walls turn blue
+
+            const p = colorProgression;
+
+            // Pacman: yellow emerges from 0.15 to 0.30
+            if (pacmanMaterial) {
+                if (p < 0.15) {
+                    pacmanMaterial.color.setHex(MONO_GREEN);
+                    pacmanMaterial.emissive.setHex(MONO_GREEN);
+                } else if (p < 0.30) {
+                    const t = (p - 0.15) / 0.15;
+                    pacmanMaterial.color.setHex(lerpColor(MONO_GREEN, REAL_COLORS.pacman.color, t));
+                    pacmanMaterial.emissive.setHex(lerpColor(MONO_GREEN, REAL_COLORS.pacman.emissive, t));
+                } else {
+                    pacmanMaterial.color.setHex(REAL_COLORS.pacman.color);
+                    pacmanMaterial.emissive.setHex(REAL_COLORS.pacman.emissive);
+                }
+            }
+
+            // Dots: brighten from 0.30 to 0.45
+            if (dotMaterialRef) {
+                if (p < 0.30) {
+                    dotMaterialRef.color.setHex(MONO_GREEN);
+                    dotMaterialRef.emissive.setHex(MONO_GREEN);
+                } else if (p < 0.45) {
+                    const t = (p - 0.30) / 0.15;
+                    dotMaterialRef.color.setHex(lerpColor(MONO_GREEN, REAL_COLORS.dot.color, t));
+                    dotMaterialRef.emissive.setHex(lerpColor(MONO_GREEN, REAL_COLORS.dot.emissive, t));
+                } else {
+                    dotMaterialRef.color.setHex(REAL_COLORS.dot.color);
+                    dotMaterialRef.emissive.setHex(REAL_COLORS.dot.emissive);
+                }
+            }
+
+            // Power pellets: same timing as dots
+            if (powerMaterialRef) {
+                if (p < 0.30) {
+                    powerMaterialRef.color.setHex(MONO_GREEN);
+                    powerMaterialRef.emissive.setHex(MONO_GREEN);
+                } else if (p < 0.45) {
+                    const t = (p - 0.30) / 0.15;
+                    powerMaterialRef.color.setHex(lerpColor(MONO_GREEN, REAL_COLORS.power.color, t));
+                    powerMaterialRef.emissive.setHex(lerpColor(MONO_GREEN, REAL_COLORS.power.emissive, t));
+                } else {
+                    powerMaterialRef.color.setHex(REAL_COLORS.power.color);
+                    powerMaterialRef.emissive.setHex(REAL_COLORS.power.emissive);
+                }
+            }
+
+            // Ghosts: each gains color at different thresholds (0.45, 0.55, 0.65, 0.75)
+            const ghostThresholds = [0.45, 0.55, 0.65, 0.75];
+            for (let i = 0; i < ghostMaterials.length && i < 4; i++) {
+                const mat = ghostMaterials[i];
+                const startT = ghostThresholds[i];
+                const endT = startT + 0.10;
+                const targetColor = REAL_COLORS.ghosts[i];
+
+                if (p < startT) {
+                    mat.color.setHex(MONO_GREEN);
+                    mat.emissive.setHex(MONO_GREEN);
+                } else if (p < endT) {
+                    const t = (p - startT) / 0.10;
+                    mat.color.setHex(lerpColor(MONO_GREEN, targetColor.color, t));
+                    mat.emissive.setHex(lerpColor(MONO_GREEN, targetColor.emissive, t));
+                } else {
+                    mat.color.setHex(targetColor.color);
+                    mat.emissive.setHex(targetColor.emissive);
+                }
+            }
+
+            // Walls: blue emerges from 0.85 to 1.00
+            if (wallMaterialRef) {
+                if (p < 0.85) {
+                    wallMaterialRef.color.setHex(MONO_GREEN);
+                } else {
+                    const t = (p - 0.85) / 0.15;
+                    wallMaterialRef.color.setHex(lerpColor(MONO_GREEN, REAL_COLORS.wall.color, t));
+                }
+            }
         }
 
         // ============================================

@@ -415,6 +415,7 @@
 
         // Monochrome green starting color
         const MONO_GREEN = 0x00ff41;
+        const DARK_GREEN = 0x003318;  // Darker green for walls
 
         // ============================================
         // AUDIO SYSTEM
@@ -1115,9 +1116,9 @@
         }
 
         function createMaze() {
-            // Wall material - START MONOCHROME GREEN
+            // Wall material - START DARK GREEN (subdued, not bright)
             const wallMaterial = new THREE.MeshLambertMaterial({
-                color: MONO_GREEN,
+                color: DARK_GREEN,
                 flatShading: true
             });
             wallMaterialRef = wallMaterial;  // Store reference for color progression
@@ -2259,13 +2260,13 @@
                 }
             }
 
-            // Walls: blue emerges from 0.85 to 1.00
+            // Walls: blue emerges from 0.85 to 1.00 (start from dark green)
             if (wallMaterialRef) {
                 if (p < 0.85) {
-                    wallMaterialRef.color.setHex(MONO_GREEN);
+                    wallMaterialRef.color.setHex(DARK_GREEN);
                 } else {
                     const t = (p - 0.85) / 0.15;
-                    wallMaterialRef.color.setHex(lerpColor(MONO_GREEN, REAL_COLORS.wall.color, t));
+                    wallMaterialRef.color.setHex(lerpColor(DARK_GREEN, REAL_COLORS.wall.color, t));
                 }
             }
         }
